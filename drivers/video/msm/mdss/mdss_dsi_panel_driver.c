@@ -1,4 +1,3 @@
-
 /* Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
  * Copyright (c) 2014 Sony Mobile Communications Inc.
  *
@@ -859,8 +858,11 @@ static int mdss_dsi_panel_change_fps_fpks_calc
 					TE_PAYLOAD_1(tec_cmds, tec_payload));
 		}
 
-		pr_debug("%s: fps change sequence\n", __func__);
-		mdss_dsi_panel_cmds_send(ctrl_pdata, &ctrl_pdata->fps_cmds);
+		if (!pinfo->lcdc.change_fps_susres_mode) {
+			pr_debug("%s: fps change sequence\n", __func__);
+			mdss_dsi_panel_cmds_send(ctrl_pdata,
+						&ctrl_pdata->fps_cmds);
+		}
 
 		pr_info("%s: change fpks=%d\n", __func__, dfpks);
 
@@ -1090,7 +1092,7 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 		return -EINVAL;
 	}
 
-	if (!spec_pdata->detected && !spec_pdata->init_from_begin && !alt_panelid_cmd)
+	if (!spec_pdata->detected && !spec_pdata->init_from_begin)
 		return 0;
 
 	mipi = &pdata->panel_info.mipi;
@@ -1418,33 +1420,28 @@ static int mdss_dsi_panel_detect(struct mdss_panel_data *pdata)
 	if (!spec_pdata->panel_detect)
 		return 0;
 
-		pr_debug("%s: Panel ID", __func__);
-	if (!alt_panelid_cmd) {
-		mdss_dsi_op_mode_config(DSI_CMD_MODE, pdata);
-		mdss_dsi_cmds_rx(ctrl_pdata,
-				 spec_pdata->id_read_cmds.cmds, 10);
-
-		pr_debug("0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X",
-			ctrl_pdata->rx_buf.data[0], ctrl_pdata->rx_buf.data[1],
-			ctrl_pdata->rx_buf.data[2], ctrl_pdata->rx_buf.data[3],
-			ctrl_pdata->rx_buf.data[4], ctrl_pdata->rx_buf.data[5],
-			ctrl_pdata->rx_buf.data[6], ctrl_pdata->rx_buf.data[7]);
-	} else {
+	/* Note: DSI has to send bad RX for the next code to work */
+	if (alt_panelid_cmd)
 		mdss_dsi_panel_cmd_read(ctrl_pdata, dcs_cmd_DA[0], dcs_cmd_DA[1],
-					dcs_read_cmd_DA, panel_id_store, 1);
-		pr_debug("0x%02X \n", panel_id[0]);
-	}
+						dcs_read_cmd_DA, panel_id_store, 1);
+
+	pr_debug("%s: Panel ID", __func__);
+	mdss_dsi_op_mode_config(DSI_CMD_MODE, pdata);
+	mdss_dsi_cmds_rx(ctrl_pdata,
+			 spec_pdata->id_read_cmds.cmds, 10);
+
+	pr_debug("0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X",
+		ctrl_pdata->rx_buf.data[0], ctrl_pdata->rx_buf.data[1],
+		ctrl_pdata->rx_buf.data[2], ctrl_pdata->rx_buf.data[3],
+		ctrl_pdata->rx_buf.data[4], ctrl_pdata->rx_buf.data[5],
+		ctrl_pdata->rx_buf.data[6], ctrl_pdata->rx_buf.data[7]);
 
 	np = of_parse_phandle(
 			pdata->panel_pdev->dev.of_node,
 			"qcom,dsi-pref-prim-pan", 0);
 
-	if (!alt_panelid_cmd)
-		rc = mdss_panel_parse_dt(np, ctrl_pdata,
-			spec_pdata->driver_ic, ctrl_pdata->rx_buf.data);
-	else
-		rc = mdss_panel_parse_dt(np, ctrl_pdata,
-			spec_pdata->driver_ic, (char*)panel_id);
+	rc = mdss_panel_parse_dt(np, ctrl_pdata,
+		spec_pdata->driver_ic, ctrl_pdata->rx_buf.data);
 
 	return 0;
 }
@@ -2180,8 +2177,7 @@ static int mdss_panel_parse_dt(struct device_node *np,
 				if (rc)
 					continue;
 			} else if (data && !id_data) {
-				if (((len != 1) || (data[0] != PANEL_SKIP_ID)) 
-								&& !alt_panelid_cmd)
+				if ((len != 1) || (data[0] != PANEL_SKIP_ID))
 					continue;
 				else {
 					rc = of_property_read_u32(next
@@ -2745,6 +2741,8 @@ static int mdss_panel_parse_dt(struct device_node *np,
 		rc = of_property_read_u32(next,
 			"somc,chenge-fps-payload-num", &tmp);
 		pinfo->lcdc.chenge_fps_payload_num = !rc ? tmp : 0;
+		pinfo->lcdc.change_fps_susres_mode = of_property_read_bool(np,
+			"somc,change-fps-suspend-resume-mode");
 
 		spec_pdata->pwron_reset = of_property_read_bool(next,
 					"somc,panel-pwron-reset");

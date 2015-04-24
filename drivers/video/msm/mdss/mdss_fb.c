@@ -244,47 +244,6 @@ static int mdss_fb_notify_update(struct msm_fb_data_type *mfd,
 	return ret;
 }
 
-static int mdss_fb_splash_thread(void *data)
-{
-	struct msm_fb_data_type *mfd = data;
-	int ret = -EINVAL;
-	struct fb_info *fbi = NULL;
-	int ov_index[2];
-
-	if (!mfd || !mfd->fbi || !mfd->mdp.splash_fnc) {
-		pr_err("Invalid input parameter\n");
-		goto end;
-	}
-
-	fbi = mfd->fbi;
-
-	ret = mdss_fb_open(fbi, current->tgid);
-	if (ret) {
-		pr_err("fb_open failed\n");
-		goto end;
-	}
-
-	mfd->bl_updated = true;
-	mdss_fb_set_backlight(mfd, mfd->panel_info->bl_max >> 1);
-
-	ret = mfd->mdp.splash_fnc(mfd, ov_index, MDP_CREATE_SPLASH_OV);
-	if (ret) {
-		pr_err("Splash image failed\n");
-		goto splash_err;
-	}
-
-	do {
-		schedule_timeout_interruptible(SPLASH_THREAD_WAIT_TIMEOUT * HZ);
-	} while (!kthread_should_stop());
-
-	mfd->mdp.splash_fnc(mfd, ov_index, MDP_REMOVE_SPLASH_OV);
-
-splash_err:
-	mdss_fb_release(fbi, current->tgid);
-end:
-	return ret;
-}
-
 static int lcd_backlight_registered;
 
 static void mdss_fb_set_bl_brightness(struct led_classdev *led_cdev,
@@ -364,9 +323,6 @@ static void mdss_fb_parse_dt(struct msm_fb_data_type *mfd)
 	u32 data[2] = {0};
 	u32 panel_xres;
 	struct platform_device *pdev = mfd->pdev;
-
-	mfd->splash_logo_enabled = of_property_read_bool(pdev->dev.of_node,
-				"qcom,mdss-fb-splash-logo-enabled");
 
 	of_property_read_u32_array(pdev->dev.of_node,
 		"qcom,mdss-fb-split", data, 2);
@@ -471,12 +427,75 @@ static ssize_t mdss_fb_get_idle_notify(struct device *dev,
 	return ret;
 }
 
+static int pcc_r = 32768, pcc_g = 32768, pcc_b = 32768;
+static ssize_t mdss_get_rgb(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%d %d %d\n", pcc_r, pcc_g, pcc_b);
+}
+
+/**
+ * simple color temperature interface using polynomial color correction
+ *
+ * input values are r/g/b adjustments from 0-32768 representing 0 -> 1
+ *
+ * example adjustment @ 3500K:
+ * 1.0000 / 0.5515 / 0.2520 = 32768 / 25828 / 17347
+ *
+ * reference chart:
+ * http://www.vendian.org/mncharity/dir3/blackbody/UnstableURLs/bbr_color.html
+ */
+static ssize_t mdss_set_rgb(struct device *dev,
+							struct device_attribute *attr,
+							const char *buf, size_t count)
+{
+	uint32_t r = 0, g = 0, b = 0;
+	struct mdp_pcc_cfg_data pcc_cfg;
+	u32 copyback = 0;
+
+    if (count > 19)
+		return -EINVAL;
+
+	sscanf(buf, "%d %d %d", &r, &g, &b);
+
+	if (r < 0 || r > 32768)
+		return -EINVAL;
+	if (g < 0 || g > 32768)
+		return -EINVAL;
+	if (b < 0 || b > 32768)
+		return -EINVAL;
+
+	pr_info("%s: r=%d g=%d b=%d", __func__, r, g, b);
+
+	memset(&pcc_cfg, 0, sizeof(struct mdp_pcc_cfg_data));
+
+	pcc_cfg.block = MDP_LOGICAL_BLOCK_DISP_0;
+	if (r == 32768 && g == 32768 && b == 32768)
+		pcc_cfg.ops = MDP_PP_OPS_DISABLE;
+	else
+		pcc_cfg.ops = MDP_PP_OPS_ENABLE;
+	pcc_cfg.ops |= MDP_PP_OPS_WRITE;
+	pcc_cfg.r.r = r;
+	pcc_cfg.g.g = g;
+	pcc_cfg.b.b = b;
+
+	if (mdss_mdp_pcc_config(&pcc_cfg, &copyback) == 0) {
+		pcc_r = r;
+		pcc_g = g;
+		pcc_b = b;
+		return count;
+	}
+
+	return -EINVAL;
+}
+
 static DEVICE_ATTR(msm_fb_type, S_IRUGO, mdss_fb_get_type, NULL);
 static DEVICE_ATTR(msm_fb_split, S_IRUGO, mdss_fb_get_split, NULL);
 static DEVICE_ATTR(show_blank_event, S_IRUGO, mdss_mdp_show_blank_event, NULL);
 static DEVICE_ATTR(idle_time, S_IRUGO | S_IWUSR | S_IWGRP,
 	mdss_fb_get_idle_time, mdss_fb_set_idle_time);
 static DEVICE_ATTR(idle_notify, S_IRUGO, mdss_fb_get_idle_notify, NULL);
+static DEVICE_ATTR(rgb, S_IRUGO | S_IWUSR | S_IWGRP, mdss_get_rgb, mdss_set_rgb);
 
 static struct attribute *mdss_fb_attrs[] = {
 	&dev_attr_msm_fb_type.attr,
@@ -484,6 +503,7 @@ static struct attribute *mdss_fb_attrs[] = {
 	&dev_attr_show_blank_event.attr,
 	&dev_attr_idle_time.attr,
 	&dev_attr_idle_notify.attr,
+	&dev_attr_rgb.attr,
 	NULL,
 };
 
@@ -631,15 +651,9 @@ static int mdss_fb_probe(struct platform_device *pdev)
 		break;
 	}
 
-	if (mfd->splash_logo_enabled) {
-		mfd->splash_thread = kthread_run(mdss_fb_splash_thread, mfd,
-				"mdss_fb_splash");
-		if (IS_ERR(mfd->splash_thread)) {
-			pr_err("unable to start splash thread %d\n",
-				mfd->index);
-			mfd->splash_thread = NULL;
-		}
-	}
+	if (mfd->mdp.splash_init_fnc)
+		mfd->mdp.splash_init_fnc(mfd);
+
 	if ((mfd->panel_info->type == MIPI_VIDEO_PANEL) ||
 		(mfd->panel_info->type == MIPI_CMD_PANEL))
 		mipi_dsi_panel_create_debugfs(mfd);
@@ -1546,12 +1560,6 @@ static int mdss_fb_open(struct fb_info *info, int user)
 	pinfo->ref_cnt++;
 	mfd->ref_cnt++;
 
-	/* Stop the splash thread once userspace open the fb node */
-	if (mfd->splash_thread && mfd->ref_cnt > 1) {
-		kthread_stop(mfd->splash_thread);
-		mfd->splash_thread = NULL;
-	}
-
 	return 0;
 
 blank_error:
@@ -1948,7 +1956,7 @@ static int mdss_fb_pan_display_sub(struct fb_var_screeninfo *var,
 		(var->yoffset / info->fix.ypanstep) * info->fix.ypanstep;
 
 	if (mfd->mdp.dma_fnc)
-		mfd->mdp.dma_fnc(mfd, NULL, 0, NULL);
+		mfd->mdp.dma_fnc(mfd);
 	else
 		pr_warn("dma function not set for panel type=%d\n",
 				mfd->panel.type);
