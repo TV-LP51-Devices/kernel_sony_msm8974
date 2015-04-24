@@ -1,4 +1,5 @@
-/* Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
+ * Copyright (C) 2013 Sony Mobile Communications AB.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -822,6 +823,9 @@
 
 		qcom,cdc-mclk-gpios = <&pm8941_gpios 15 0>;
 		qcom,taiko-mclk-clk-freq = <9600000>;
+
+		qcom,hdmi-audio-rx;
+
 		qcom,prim-auxpcm-gpio-clk  = <&msmgpio 65 0>;
 		qcom,prim-auxpcm-gpio-sync = <&msmgpio 66 0>;
 		qcom,prim-auxpcm-gpio-din  = <&msmgpio 67 0>;
@@ -1568,6 +1572,7 @@
 		reg = <0 4>;
 		compatible = "qcom,msm-cpufreq";
 		qcom,cpufreq-table =
+			<  268800  300000  572 >,
 			<  300000  300000  572 >,
 			<  422400  422400 1144 >,
 			<  652800  499200 1525 >,
@@ -1582,7 +1587,10 @@
 			< 1728000 1651200 6103 >,
 			< 1958400 1728000 7102 >,
 			< 2265600 1728000 7102 >,
-			< 2457600 1728000 7102 >;
+			< 2419200 1728000 7102 /* 931 MHz */ >,
+			< 2572800 1728000 7102 /* 931 MHz */ >,
+			< 2726400 1728000 7102 /* 931 MHz */ >,
+			< 2803200 1728000 7102 /* 931 MHz */ >;
 	};
 
 	usb3: qcom,ssusb@f9200000 {
@@ -1736,6 +1744,10 @@
 
 	qcom,msm-pcm-loopback {
 		compatible = "qcom,msm-pcm-loopback";
+	};
+
+	qcom,msm-voice-svc {
+		compatible = "qcom,msm-voice-svc";
 	};
 
 	qcom,msm-dai-q6 {
@@ -1983,6 +1995,7 @@
 		gpios = <&msmgpio 36 0>, <&msmgpio 37 0>, <&msmgpio 38 0>, <&msmgpio 39 0>, <&msmgpio 40 0>;
 		qcom,has-48mhz-xo;
 		qcom,has-pronto-hw;
+		qcom,wcnss-pm = <11 21 1200 1 1 6>;
 	};
 
 	qcom,ocmem@fdd00000 {
@@ -2043,12 +2056,15 @@
 		reg = <0x7b00000 0x500000>;
 		reg-names = "secapp-region";
 		qcom,disk-encrypt-pipe-pair = <2>;
+		qcom,file-encrypt-pipe-pair = <0>;
 		qcom,hlos-ce-hw-instance = <1>;
 		qcom,qsee-ce-hw-instance = <0>;
 		qcom,support-bus-scaling;
 		qcom,msm-bus,name = "qseecom-noc";
 		qcom,msm-bus,num-cases = <4>;
 		qcom,msm-bus,num-paths = <1>;
+		qcom,support-fde;
+		qcom,support-pfe;
 		qcom,msm-bus,vectors-KBps =
 				<55 512 0 0>,
 				<55 512 0 0>,
@@ -2060,8 +2076,8 @@
 		compatible = "qcom,msm-watchdog";
 		reg = <0xf9017000 0x1000>;
 		interrupts = <0 3 0>, <0 4 0>;
-		qcom,bark-time = <11000>;
-		qcom,pet-time = <10000>;
+		qcom,bark-time = <21000>;
+		qcom,pet-time = <20000>;
 		qcom,ipi-ping;
 	};
 
@@ -2132,8 +2148,7 @@
 
 	qcom,msm-rtb {
 		compatible = "qcom,msm-rtb";
-		qcom,memory-reservation-type = "EBI1";
-		qcom,memory-reservation-size = <0x100000>; /* 1M EBI1 buffer */
+		qcom,rtb-size = <0x100000>;
 	};
 
 	qcom,msm-contig-mem {
@@ -2150,6 +2165,7 @@
 		interrupts = <0 236 0>;
 		qcom,bam-pipe-pair = <1>;
 		qcom,ce-hw-instance = <1>;
+		qcom,ce-device = <0>;
                 qcom,msm-bus,name = "qcedev-noc";
 		qcom,msm-bus,num-cases = <2>;
 		qcom,msm-bus,num-paths = <1>;
@@ -2166,6 +2182,7 @@
 		interrupts = <0 236 0>;
 		qcom,bam-pipe-pair = <2>;
 		qcom,ce-hw-instance = <1>;
+		qcom,ce-device = <0>;
 		qcom,clk-mgmt-sus-res;
                 qcom,msm-bus,name = "qcrypto-noc";
 		qcom,msm-bus,num-cases = <2>;
@@ -2428,6 +2445,12 @@
 		interrupts = <0 1 0>;
 	};
 
+	bimc_sharedmem {
+		compatible = "qcom,sharedmem-uio";
+		reg = <0xfc380000 0x00100000>;
+		reg-names = "bimc";
+	};
+
 	qcom,smdtty {
 		compatible = "qcom,smdtty";
 
@@ -2486,6 +2509,13 @@
 			qcom,smdtty-port-name = "LOOPBACK";
 			qcom,smdtty-dev-name = "LOOPBACK_TTY";
 		};
+	};
+
+	qcom,avtimer {
+		compatible = "qcom,avtimer";
+		reg = <0xfe053008 0x4>,
+			<0xfe05300c 0x4>;
+		reg-names = "avtimer_lsb_addr", "avtimer_msb_addr";
 	};
 };
 

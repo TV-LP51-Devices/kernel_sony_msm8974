@@ -1,4 +1,5 @@
-/* Copyright (c) 2013-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013, The Linux Foundation. All rights reserved.
+ * Copyright (C) 2013 Sony Mobile Communications AB.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -19,7 +20,7 @@
 #include <linux/io.h>
 #include <linux/list.h>
 #include <linux/delay.h>
-#include <linux/avtimer.h>
+#include <linux/avtimer_kernel.h>
 #include <media/v4l2-subdev.h>
 #include <media/msmb_isp.h>
 #include <mach/msm_bus.h>
@@ -71,12 +72,6 @@ enum msm_isp_camif_update_state {
 	DISABLE_CAMIF_IMMEDIATELY
 };
 
-enum msm_isp_reset_type {
-	ISP_RST_HARD,
-	ISP_RST_SOFT,
-	ISP_RST_MAX
-};
-
 struct msm_isp_timestamp {
 	/*Monotonic clock for v4l2 buffer*/
 	struct timeval buf_time;
@@ -112,7 +107,7 @@ struct msm_vfe_axi_ops {
 		uint32_t reload_mask);
 	void (*enable_wm) (struct vfe_device *vfe_dev,
 		uint8_t wm_idx, uint8_t enable);
-	int32_t (*cfg_io_format) (struct vfe_device *vfe_dev,
+	void (*cfg_io_format) (struct vfe_device *vfe_dev,
 		enum msm_vfe_axi_stream_src stream_src,
 		uint32_t io_format);
 	void (*cfg_framedrop) (struct vfe_device *vfe_dev,
@@ -153,8 +148,7 @@ struct msm_vfe_axi_ops {
 
 struct msm_vfe_core_ops {
 	void (*reg_update) (struct vfe_device *vfe_dev);
-	long (*reset_hw) (struct vfe_device *vfe_dev,
-		enum msm_isp_reset_type reset_type);
+	long (*reset_hw) (struct vfe_device *vfe_dev);
 	int (*init_hw) (struct vfe_device *vfe_dev);
 	void (*init_hw_reg) (struct vfe_device *vfe_dev);
 	void (*release_hw) (struct vfe_device *vfe_dev);
@@ -404,11 +398,6 @@ struct msm_vfe_error_info {
 	uint32_t error_count;
 };
 
-struct msm_vfe_frame_ts {
-	struct timeval buf_time;
-	uint32_t frame_id;
-};
-
 struct vfe_device {
 	struct platform_device *pdev;
 	struct msm_sd_subdev subdev;
@@ -451,7 +440,6 @@ struct vfe_device {
 	struct msm_vfe_axi_shared_data axi_data;
 	struct msm_vfe_stats_shared_data stats_data;
 	struct msm_vfe_error_info error_info;
-	struct msm_vfe_frame_ts frame_ts;
 	struct msm_isp_buf_mgr *buf_mgr;
 	int dump_reg;
 	int vfe_clk_idx;
@@ -459,6 +447,9 @@ struct vfe_device {
 	uint8_t vt_enable;
 	void __iomem *p_avtimer_msw;
 	void __iomem *p_avtimer_lsw;
+#if defined(CONFIG_SONY_CAM_V4L2)
+	int timeout;
+#endif
 };
 
 #endif

@@ -391,8 +391,9 @@ static int wait_for_sess_signal_receipt(struct msm_vidc_inst *inst,
 		&inst->completions[SESSION_MSG_INDEX(cmd)],
 		msecs_to_jiffies(msm_vidc_hw_rsp_timeout));
 	if (!rc) {
-		dprintk(VIDC_ERR, "Wait interrupted or timeout: %d\n",
-				SESSION_MSG_INDEX(cmd));
+		dprintk(VIDC_ERR,
+			"%s: Wait interrupted or timeout[%u]: %d\n",
+			__func__, (u32)inst->session, SESSION_MSG_INDEX(cmd));
 		msm_comm_recover_from_session_error(inst);
 		rc = -EIO;
 	} else {
@@ -440,6 +441,21 @@ static void msm_comm_generate_session_error(struct msm_vidc_inst *inst)
 	mutex_unlock(&inst->lock);
 }
 
+static void msm_comm_generate_max_clients_error(struct msm_vidc_inst *inst)
+{
+	if (!inst) {
+		dprintk(VIDC_ERR, "%s: invalid input parameters\n", __func__);
+		return;
+	}
+	mutex_lock(&inst->sync_lock);
+	inst->session = NULL;
+	inst->state = MSM_VIDC_CORE_INVALID;
+	msm_vidc_queue_v4l2_event(inst, V4L2_EVENT_MSM_VIDC_MAX_CLIENTS);
+	dprintk(VIDC_WARN,
+			"%s: Too many clients\n", __func__);
+	mutex_unlock(&inst->sync_lock);
+}
+
 static void handle_session_init_done(enum command_response cmd, void *data)
 {
 	struct msm_vidc_cb_cmd_done *response = data;
@@ -470,6 +486,8 @@ static void handle_session_init_done(enum command_response cmd, void *data)
 			inst->capability.hier_p = session_init_done->hier_p;
 			inst->capability.pixelprocess_capabilities =
 				call_hfi_op(hdev, get_core_capabilities);
+			inst->capability.mbs_per_frame =
+				session_init_done->mbs_per_frame;
 			inst->capability.capability_set = true;
 			inst->capability.buffer_mode[CAPTURE_PORT] =
 				session_init_done->alloc_mode_out;
@@ -477,7 +495,10 @@ static void handle_session_init_done(enum command_response cmd, void *data)
 			dprintk(VIDC_ERR,
 				"Session init response from FW : 0x%x",
 				response->status);
-			msm_comm_generate_session_error(inst);
+			if (response->status == VIDC_ERR_MAX_CLIENTS)
+				msm_comm_generate_max_clients_error(inst);
+			else
+				msm_comm_generate_session_error(inst);
 		}
 		signal_session_msg_receipt(cmd, inst);
 	} else {
@@ -1240,6 +1261,10 @@ static void handle_fbd(enum command_response cmd, void *data)
 		vb->v4l2_planes[0].reserved[3] = fill_buf_done->start_y_coord;
 		vb->v4l2_planes[0].reserved[4] = fill_buf_done->frame_width;
 		vb->v4l2_planes[0].reserved[5] = fill_buf_done->frame_height;
+		vb->v4l2_planes[0].reserved[6] =
+			inst->prop.width[CAPTURE_PORT];
+		vb->v4l2_planes[0].reserved[7] =
+			inst->prop.height[CAPTURE_PORT];
 		if (vb->v4l2_planes[0].data_offset > vb->v4l2_planes[0].length)
 			dprintk(VIDC_INFO,
 				"fbd:Overflow data_offset = %d; length = %d\n",
@@ -1567,8 +1592,8 @@ static int msm_comm_unset_ocmem(struct msm_vidc_core *core)
 		&core->completions[SYS_MSG_INDEX(RELEASE_RESOURCE_DONE)],
 		msecs_to_jiffies(msm_vidc_hw_rsp_timeout));
 	if (!rc) {
-		dprintk(VIDC_ERR, "Wait interrupted or timeout: %d\n",
-				SYS_MSG_INDEX(RELEASE_RESOURCE_DONE));
+		dprintk(VIDC_ERR, "%s: Wait interrupted or timeout: %d\n",
+			__func__, SYS_MSG_INDEX(RELEASE_RESOURCE_DONE));
 		rc = -EIO;
 	}
 release_ocmem_failed:
@@ -1590,8 +1615,8 @@ static int msm_comm_init_core_done(struct msm_vidc_inst *inst)
 		&core->completions[SYS_MSG_INDEX(SYS_INIT_DONE)],
 		msecs_to_jiffies(msm_vidc_hw_rsp_timeout));
 	if (!rc) {
-		dprintk(VIDC_ERR, "Wait interrupted or timeout: %d\n",
-				SYS_MSG_INDEX(SYS_INIT_DONE));
+		dprintk(VIDC_ERR, "%s: Wait interrupted or timeout: %d\n",
+			__func__, SYS_MSG_INDEX(SYS_INIT_DONE));
 		rc = -EIO;
 		goto exit;
 	} else {
@@ -2072,6 +2097,33 @@ exit:
 	return rc;
 }
 
+int msm_comm_suspend(int core_id)
+{
+	struct hfi_device *hdev;
+	struct msm_vidc_core *core;
+	int rc = 0;
+
+	core = get_vidc_core(core_id);
+	if (!core) {
+		dprintk(VIDC_ERR,
+			"%s: Failed to find core for core_id = %d\n",
+			__func__, core_id);
+		return -EINVAL;
+	}
+
+	hdev = (struct hfi_device *)core->device;
+	if (!hdev) {
+		dprintk(VIDC_ERR, "%s Invalid device handle\n", __func__);
+		return -EINVAL;
+	}
+
+	rc = call_hfi_op(hdev, suspend, hdev->hfi_device_data);
+	if (rc)
+		dprintk(VIDC_WARN, "Failed to suspend\n");
+
+	return rc;
+}
+
 static int get_flipped_state(int present_state,
 	int desired_state)
 {
@@ -2108,7 +2160,7 @@ static int set_output_buffers(struct msm_vidc_inst *inst,
 	int rc = 0;
 	struct msm_smem *handle;
 	struct internal_buf *binfo;
-	struct vidc_buffer_addr_info buffer_info;
+	struct vidc_buffer_addr_info buffer_info = {0};
 	u32 smem_flags = 0, buffer_size;
 	struct hal_buffer_requirements *output_buf, *extradata_buf;
 	int i;
@@ -2128,19 +2180,21 @@ static int set_output_buffers(struct msm_vidc_inst *inst,
 		output_buf->buffer_count_actual,
 		output_buf->buffer_size);
 
+	buffer_size = output_buf->buffer_size;
+
 	extradata_buf = get_buff_req_buffer(inst, HAL_BUFFER_EXTRADATA_OUTPUT);
-	if (!extradata_buf) {
+	if (extradata_buf) {
+		dprintk(VIDC_DBG,
+			"extradata: num = %d, size = %d\n",
+			extradata_buf->buffer_count_actual,
+			extradata_buf->buffer_size);
+		buffer_size += extradata_buf->buffer_size;
+	} else {
 		dprintk(VIDC_DBG,
 			"This extradata buffer not required, buffer_type: %x\n",
 			buffer_type);
-		return 0;
 	}
-	dprintk(VIDC_DBG,
-		"extradata: num = %d, size = %d\n",
-		extradata_buf->buffer_count_actual,
-		extradata_buf->buffer_size);
 
-	buffer_size = output_buf->buffer_size + extradata_buf->buffer_size;
 	if (inst->flags & VIDC_SECURE)
 		smem_flags |= SMEM_SECURE;
 
@@ -2178,7 +2232,10 @@ static int set_output_buffers(struct msm_vidc_inst *inst,
 			buffer_info.align_device_addr = handle->device_addr;
 			buffer_info.extradata_addr = handle->device_addr +
 				output_buf->buffer_size;
-			buffer_info.extradata_size = extradata_buf->buffer_size;
+			if (extradata_buf) {
+				buffer_info.extradata_size =
+					extradata_buf->buffer_size;
+			}
 			dprintk(VIDC_DBG, "Output buffer address: %x",
 					buffer_info.align_device_addr);
 			dprintk(VIDC_DBG, "Output extradata address: %x",
@@ -2681,7 +2738,8 @@ int msm_comm_try_get_bufreqs(struct msm_vidc_inst *inst)
 		msecs_to_jiffies(msm_vidc_hw_rsp_timeout));
 	if (!rc) {
 		dprintk(VIDC_ERR,
-			"Wait interrupted or timeout: %d\n",
+			"%s: Wait interrupted or timeout[%u]: %d\n",
+			__func__, (u32)inst->session,
 			SESSION_MSG_INDEX(SESSION_PROPERTY_INFO));
 		inst->state = MSM_VIDC_CORE_INVALID;
 		msm_comm_recover_from_session_error(inst);
@@ -3098,6 +3156,40 @@ void msm_comm_flush_dynamic_buffers(struct msm_vidc_inst *inst)
 	mutex_unlock(&inst->lock);
 }
 
+void msm_comm_flush_pending_dynamic_buffers(struct msm_vidc_inst *inst)
+{
+	struct buffer_info *binfo = NULL;
+	struct list_head *list = NULL;
+
+	if (!inst)
+		return;
+
+	if (inst->buffer_mode_set[CAPTURE_PORT] != HAL_BUFFER_MODE_DYNAMIC)
+		return;
+
+	if (list_empty(&inst->pendingq) || list_empty(&inst->registered_bufs))
+		return;
+
+	list = &inst->registered_bufs;
+
+	/*
+	* Dynamic Buffer mode - Since pendingq is not empty
+	* no output buffers have been sent to firmware yet.
+	* Hence remove reference to all pendingq o/p buffers
+	* before flushing them.
+	*/
+
+	list_for_each_entry(binfo, list, list) {
+		if (binfo && binfo->type ==
+			V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) {
+			dprintk(VIDC_DBG,
+				"%s: binfo = %p device_addr = 0x%pa\n",
+				__func__, binfo, &binfo->device_addr[0]);
+			buf_ref_put(inst, binfo);
+		}
+	}
+}
+
 int msm_comm_flush(struct msm_vidc_inst *inst, u32 flags)
 {
 	int rc =  0;
@@ -3163,6 +3255,8 @@ int msm_comm_flush(struct msm_vidc_inst *inst, u32 flags)
 
 	} else {
 		if (!list_empty(&inst->pendingq)) {
+			msm_comm_flush_pending_dynamic_buffers(inst);
+
 			/*If flush is called after queueing buffers but before
 			 * streamon driver should flush the pending queue*/
 			list_for_each_safe(ptr, next, &inst->pendingq) {
@@ -3228,12 +3322,6 @@ enum hal_extradata_id msm_comm_get_hal_extradata_index(
 	case V4L2_MPEG_VIDC_EXTRADATA_RECOVERY_POINT_SEI:
 		ret = HAL_EXTRADATA_RECOVERY_POINT_SEI;
 		break;
-	case V4L2_MPEG_VIDC_EXTRADATA_CLOSED_CAPTION_UD:
-		ret = HAL_EXTRADATA_CLOSED_CAPTION_UD;
-		break;
-	case V4L2_MPEG_VIDC_EXTRADATA_AFD_UD:
-		ret = HAL_EXTRADATA_AFD_UD;
-		break;
 	case V4L2_MPEG_VIDC_EXTRADATA_MULTISLICE_INFO:
 		ret = HAL_EXTRADATA_MULTISLICE_INFO;
 		break;
@@ -3260,6 +3348,9 @@ enum hal_extradata_id msm_comm_get_hal_extradata_index(
 		break;
 	case V4L2_MPEG_VIDC_EXTRADATA_METADATA_MBI:
 		ret = HAL_EXTRADATA_METADATA_MBI;
+		break;
+	case V4L2_MPEG_VIDC_EXTRADATA_STREAM_USERDATA:
+		ret = HAL_EXTRADATA_STREAM_USERDATA;
 		break;
 	default:
 		dprintk(VIDC_WARN, "Extradata not found: %d\n", index);
@@ -3458,7 +3549,11 @@ int msm_vidc_check_session_supported(struct msm_vidc_inst *inst)
 		mutex_lock(&inst->sync_lock);
 		inst->state = MSM_VIDC_CORE_INVALID;
 		mutex_unlock(&inst->sync_lock);
-		msm_vidc_queue_v4l2_event(inst, V4L2_EVENT_MSM_VIDC_SYS_ERROR);
+		msm_vidc_queue_v4l2_event(inst,
+					V4L2_EVENT_MSM_VIDC_HW_OVERLOAD);
+		dprintk(VIDC_WARN,
+			"%s: Hardware is overloaded\n", __func__);
+		wake_up(&inst->kernel_event_queue);
 	}
 	return rc;
 }
@@ -3508,8 +3603,9 @@ int msm_comm_recover_from_session_error(struct msm_vidc_inst *inst)
 		&inst->completions[SESSION_MSG_INDEX(SESSION_ABORT_DONE)],
 		msecs_to_jiffies(msm_vidc_hw_rsp_timeout));
 	if (!rc) {
-		dprintk(VIDC_ERR, "%s: Wait interrupted or timeout: %d\n",
-			__func__, SESSION_MSG_INDEX(SESSION_ABORT_DONE));
+		dprintk(VIDC_ERR, "%s: Wait interrupted or timeout[%u]: %d\n",
+			__func__, (u32)inst->session,
+			SESSION_MSG_INDEX(SESSION_ABORT_DONE));
 		msm_comm_generate_sys_error(inst);
 	} else
 		change_inst_state(inst, MSM_VIDC_CLOSE_DONE);

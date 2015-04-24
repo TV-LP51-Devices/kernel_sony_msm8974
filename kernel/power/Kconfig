@@ -18,6 +18,13 @@ config SUSPEND_FREEZER
 
 	  Turning OFF this setting is NOT recommended! If in doubt, say Y.
 
+config POWERSUSPEND
+	bool "Power suspend"
+	default y
+	---help---
+	  Call early suspend handlers when the user requested sleep state
+	  changes.
+
 config HIBERNATE_CALLBACKS
 	bool
 
@@ -178,6 +185,18 @@ config PM_TEST_SUSPEND
 config CAN_PM_TRACE
 	def_bool y
 	depends on PM_DEBUG && PM_SLEEP
+
+config PM_WAKEUP_TIMES
+	bool "Log time taken for device wakeup"
+	def_bool y
+	depends on PM && PM_SLEEP && DEBUG_FS
+	---help---
+	  This enables code that calculates the total time spent for device
+	  suspend and resume. These statistics are then logged to
+	  <debugfs>/suspend_stats.
+
+	  The statistics include minimum, maximum, average and the most recent
+	  times for resume and suspend.
 
 config PM_TRACE
 	bool

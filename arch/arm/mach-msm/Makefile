@@ -263,7 +263,7 @@ obj-$(CONFIG_MACH_MSM8930_MTP) += board-8930-all.o board-8930-regulator-pm8038.o
 obj-$(CONFIG_MACH_MSM8930_FLUID) += board-8930-all.o board-8930-regulator-pm8038.o board-8930-regulator-pm8917.o
 obj-$(CONFIG_PM8921_BMS) += bms-batterydata.o bms-batterydata-desay.o batterydata-lib.o
 obj-$(CONFIG_QPNP_BMS) += bms-batterydata.o bms-batterydata-desay.o batterydata-lib.o
-obj-$(CONFIG_QPNP_BMS) += bms-batterydata-oem.o bms-batterydata-qrd-4v35-2000mah.o bms-batterydata-qrd-4v2-1300mah.o
+obj-$(CONFIG_QPNP_BMS) += bms-batterydata-qrd-4v35-2000mah.o bms-batterydata-qrd-4v2-1300mah.o
 obj-$(CONFIG_MACH_APQ8064_CDP) += board-8064-all.o board-8064-regulator.o
 obj-$(CONFIG_MACH_APQ8064_MTP) += board-8064-all.o board-8064-regulator.o
 obj-$(CONFIG_MACH_APQ8064_LIQUID) += board-8064-all.o board-8064-regulator.o
@@ -273,7 +273,8 @@ obj-$(CONFIG_ARCH_MSM9615) += board-9615.o devices-9615.o board-9615-regulator.o
 obj-$(CONFIG_ARCH_MSM9615) += clock-local.o clock-9615.o acpuclock-9615.o clock-rpm.o clock-pll.o
 obj-$(CONFIG_ARCH_APQ8084) += board-8084.o board-8084-gpiomux.o
 obj-$(CONFIG_ARCH_APQ8084) += clock-8084.o
-obj-$(CONFIG_ARCH_MSM8974) += board-8974.o board-8974-gpiomux.o
+obj-$(CONFIG_ARCH_MSM8974) += board-8974.o
+obj-$(CONFIG_ARCH_MSM8974) += board-8974-console.o
 obj-$(CONFIG_ARCH_MSM8974) += clock-krait-8974.o
 obj-$(CONFIG_ARCH_MSM8974) += clock-local2.o clock-pll.o clock-8974.o clock-rpm.o clock-voter.o clock-mdss-8974.o
 obj-$(CONFIG_ARCH_MSM8974) += gdsc.o
@@ -289,7 +290,6 @@ obj-$(CONFIG_ARCH_MSM9625) += board-9625.o board-9625-gpiomux.o
 obj-$(CONFIG_ARCH_MSM9625) += clock-local2.o clock-pll.o clock-9625.o clock-rpm.o clock-voter.o acpuclock-9625.o acpuclock-cortex.o
 obj-$(CONFIG_ARCH_MPQ8092) += board-8092.o board-8092-gpiomux.o
 obj-$(CONFIG_ARCH_MPQ8092) += clock-8092.o
-obj-$(CONFIG_ARCH_MSM8226) += board-8226.o board-8226-gpiomux.o
 obj-$(CONFIG_ARCH_MSM8226) += clock-local2.o clock-pll.o clock-8226.o clock-rpm.o clock-voter.o clock-mdss-8974.o
 obj-$(CONFIG_ARCH_MSM8226) += acpuclock-8226.o acpuclock-cortex.o
 obj-$(CONFIG_ARCH_MSM8610) += board-8610.o board-8610-gpiomux.o
@@ -304,6 +304,46 @@ obj-$(CONFIG_MACH_SAPPHIRE) += board-sapphire.o board-sapphire-gpio.o
 obj-$(CONFIG_MACH_SAPPHIRE) += board-sapphire-keypad.o board-sapphire-panel.o
 obj-$(CONFIG_MACH_SAPPHIRE) += board-sapphire-mmc.o board-sapphire-wifi.o
 obj-$(CONFIG_MACH_SAPPHIRE) += board-sapphire-rfkill.o msm_vibrator.o
+
+ifdef CONFIG_MACH_SONY_FLAMINGO
+	obj-$(CONFIG_MACH_SONY_FLAMINGO) += board-8226.o board-8226-yukon_flamingo-gpiomux.o board-sony_yukon-nfc.o  bms-batterydata-flamingo.o
+else ifdef CONFIG_MACH_SONY_EAGLE
+        obj-$(CONFIG_MACH_SONY_EAGLE) += board-8226.o board-8226-yukon_eagle-gpiomux.o board-sony_yukon-nfc.o bms-batterydata-eagle.o
+else ifdef CONFIG_MACH_SONY_TIANCHI
+	obj-$(CONFIG_MACH_SONY_TIANCHI) += board-8226.o board-8226-yukon_tianchi-gpiomux.o board-sony_yukon-nfc.o bms-batterydata-mari.o bms-batterydata-marie.o bms-batterydata-oem.o
+else ifdef CONFIG_MACH_SONY_SEAGULL
+	obj-$(CONFIG_MACH_SONY_SEAGULL) += board-8226.o board-8226-yukon_seagull-gpiomux.o board-sony_yukon-nfc.o bms-batterydata-seagull.o
+else
+	obj-$(CONFIG_ARCH_MSM8226) += board-8226.o board-8226-gpiomux.o bms-batterydata-oem.o
+endif
+
+ifdef CONFIG_MACH_SONY_SIRIUS
+	obj-$(CONFIG_MACH_SONY_SIRIUS) += board-sony_sirius-gpiomux.o board-sony_sirius_samba-gpiomux-diff.o board-sony_shinano-nfc.o bms-batterydata-gouf.o
+else ifdef CONFIG_MACH_SONY_CASTOR
+	obj-$(CONFIG_MACH_SONY_CASTOR) += board-sony_castor-gpiomux.o board-sony_shinano-nfc.o bms-batterydata-vega.o
+else ifdef CONFIG_MACH_SONY_CASTOR_WINDY
+	obj-$(CONFIG_MACH_SONY_CASTOR_WINDY) += board-sony_castor_windy-gpiomux.o board-sony_shinano-nfc.o bms-batterydata-vega.o
+else ifdef CONFIG_MACH_SONY_LEO
+	obj-$(CONFIG_MACH_SONY_LEO) += board-sony_leo-gpiomux.o board-sony_leo_samba-gpiomux-diff.o bms-batterydata-leo.o board-sony_shinano-nfc.o
+else ifdef CONFIG_MACH_SONY_ARIES
+	obj-$(CONFIG_MACH_SONY_ARIES) += board-sony_aries-gpiomux.o bms-batterydata-aries.o board-sony_shinano-nfc.o
+else ifdef CONFIG_MACH_SONY_SCORPION
+	obj-$(CONFIG_MACH_SONY_SCORPION) += board-sony_scorpion-gpiomux.o bms-batterydata-scorpion.o board-sony_shinano-nfc.o
+else ifdef CONFIG_MACH_SONY_SCORPION_WINDY
+	obj-$(CONFIG_MACH_SONY_SCORPION_WINDY) += board-sony_scorpion_windy-gpiomux.o bms-batterydata-scorpion.o board-sony_shinano-nfc.o
+else ifdef CONFIG_MACH_SONY_TOGARI_ROW
+	obj-$(CONFIG_MACH_SONY_TOGARI_ROW) += board-sony_togari_row-gpiomux.o bms-batterydata-burton.o
+else ifdef CONFIG_MACH_SONY_HONAMI_ROW
+	obj-$(CONFIG_MACH_SONY_HONAMI_ROW) += board-sony_honami_row-gpiomux.o bms-batterydata-salomon.o
+else ifdef CONFIG_MACH_SONY_AMAMI_ROW
+	obj-$(CONFIG_MACH_SONY_AMAMI_ROW) += board-sony_amami_row-gpiomux.o bms-batterydata-ray.o
+else
+	obj-$(CONFIG_ARCH_MSM8974) += board-8974-gpiomux.o board-sony_shinano-nfc.o bms-batterydata-oem.o
+endif
+
+obj-$(CONFIG_MACH_SONY_SHINANO) += board-sony_shinano-wifi.o board-sony_shinano-hw.o board-sony_shinano-gpiomux-ref.o
+obj-$(CONFIG_MACH_SONY_RHINE) += board-sony_rhine-gpiomux-ref.o
+obj-$(CONFIG_ARCH_MSM8974) += sony_gpiomux.o
 
 CFLAGS_msm_vibrator.o += -Idrivers/staging/android
 CFLAGS_board-9615.o += -Idrivers/usb/gadget
@@ -362,7 +402,16 @@ obj-$(CONFIG_ARCH_APQ8084) += gpiomux-v2.o gpiomux.o
 obj-$(CONFIG_ARCH_FSM9900) += gpiomux-v2.o gpiomux.o
 
 obj-$(CONFIG_MSM_SLEEP_STATS_DEVICE) += idle_stats_device.o
-obj-$(CONFIG_MSM_DCVS) += msm_dcvs_scm.o msm_dcvs.o msm_mpdecision.o
+obj-$(CONFIG_MSM_DCVS) += msm_dcvs_scm.o msm_dcvs.o
+
+ifdef CONFIG_MSM_MPDEC
+obj-y += msm_mpdecision.o
+else
+obj-$(CONFIG_MSM_DCVS) += msm_mpdecision_qcom.o
+endif
+
+obj-$(CONFIG_FAST_HOTPLUG) += fast_hotplug.o
+
 obj-$(CONFIG_MSM_RUN_QUEUE_STATS) += msm_rq_stats.o
 obj-$(CONFIG_MSM_SHOW_RESUME_IRQ) += msm_show_resume_irq.o
 obj-$(CONFIG_BT_MSM_PINTEST)  += btpintest.o
@@ -409,7 +458,7 @@ obj-$(CONFIG_MEMORY_HOLE_CARVEOUT) +=  msm_mem_hole.o
 
 obj-$(CONFIG_MSM_SMCMOD) += smcmod.o
 obj-$(CONFIG_MSM_CPU_PWRCTL) +=  msm_cpu_pwrctl.o
-
+obj-$(CONFIG_MSM_MODEM_SUBSYSTEM_RESTART_MONITOR) += modem_restart_monitor.o
 obj-$(CONFIG_ARCH_MSM8974) += msm_mpmctr.o
 obj-$(CONFIG_MSM_CPR_REGULATOR) += cpr-regulator.o
 obj-$(CONFIG_CPU_FREQ_MSM) += cpufreq.o
@@ -419,3 +468,12 @@ obj-$(CONFIG_WALL_CLK) += wallclk.o
 obj-$(CONFIG_WALL_CLK_SYSFS) += wallclk_sysfs.o
 obj-$(CONFIG_ARCH_RANDOM) += early_random.o
 obj-$(CONFIG_PERFMAP) += perfmap.o
+obj-$(CONFIG_MSM_CPUFREQ_LIMITER) += cpufreq_limit.o
+obj-$(CONFIG_FORCE_FAST_CHARGE) += fastchg.o
+obj-$(CONFIG_HAS_MACH_MEMUTILS) += memutils/
+obj-$(CONFIG_MSM_SLEEPER) += msm-sleeper.o
+
+CFLAGS_board-8974-console.o += -Idrivers/staging/android
+obj-$(CONFIG_ALUCARD_HOTPLUG) += alucard_hotplug.o
+
+obj-$(CONFIG_BRICKED_HOTPLUG) += bricked_hotplug.o

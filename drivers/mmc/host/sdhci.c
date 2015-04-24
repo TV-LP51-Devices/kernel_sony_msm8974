@@ -2,6 +2,7 @@
  *  linux/drivers/mmc/host/sdhci.c - Secure Digital Host Controller Interface driver
  *
  *  Copyright (C) 2005-2008 Pierre Ossman, All Rights Reserved.
+ *  Copyright (C) 2013 Sony Mobile Communications Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -28,6 +29,7 @@
 #include <linux/mmc/mmc.h>
 #include <linux/mmc/host.h>
 #include <linux/mmc/card.h>
+#include <linux/mmc/cd-gpio.h>
 
 #include "sdhci.h"
 
@@ -515,6 +517,9 @@ static int sdhci_pre_dma_transfer(struct sdhci_host *host,
 				  struct sdhci_next *next)
 {
 	int sg_count;
+	unsigned long flags;
+
+	spin_lock_irqsave(&host->next_lock, flags);
 
 	if (!next && data->host_cookie &&
 	    data->host_cookie != host->next_data.cookie) {
@@ -536,14 +541,18 @@ static int sdhci_pre_dma_transfer(struct sdhci_host *host,
 		host->next_data.sg_count = 0;
 	}
 
-	if (sg_count == 0)
+	if (sg_count == 0) {
+		spin_unlock_irqrestore(&host->next_lock, flags);
 		return -EINVAL;
+	}
 
 	if (next) {
 		next->sg_count = sg_count;
 		data->host_cookie = ++next->cookie < 0 ? 1 : next->cookie;
 	} else
 		host->sg_count = sg_count;
+
+	spin_unlock_irqrestore(&host->next_lock, flags);
 
 	return sg_count;
 }
@@ -1567,6 +1576,7 @@ static void sdhci_request(struct mmc_host *mmc, struct mmc_request *mrq)
 					MMC_SEND_TUNING_BLOCK_HS200 :
 					MMC_SEND_TUNING_BLOCK;
 				host->mrq = NULL;
+				host->flags &= ~SDHCI_NEEDS_RETUNING;
 				spin_unlock_irqrestore(&host->lock, flags);
 				sdhci_execute_tuning(mmc, tuning_opcode);
 				spin_lock_irqsave(&host->lock, flags);
@@ -1906,6 +1916,17 @@ static void sdhci_hw_reset(struct mmc_host *mmc)
 
 	if (host->ops && host->ops->hw_reset)
 		host->ops->hw_reset(host);
+}
+
+static int sdhci_get_cd(struct mmc_host *mmc)
+{
+	struct sdhci_host *host = mmc_priv(mmc);
+	int ret;
+
+	sdhci_runtime_pm_get(host);
+	ret = mmc_cd_get_status(mmc);
+	sdhci_runtime_pm_put(host);
+	return ret;
 }
 
 static int sdhci_get_ro(struct mmc_host *mmc)
@@ -2383,6 +2404,7 @@ static const struct mmc_host_ops sdhci_ops = {
 	.request	= sdhci_request,
 	.set_ios	= sdhci_set_ios,
 	.get_ro		= sdhci_get_ro,
+	.get_cd		= sdhci_get_cd,
 	.hw_reset	= sdhci_hw_reset,
 	.enable_sdio_irq = sdhci_enable_sdio_irq,
 	.start_signal_voltage_switch	= sdhci_start_signal_voltage_switch,
@@ -2561,6 +2583,7 @@ static void sdhci_tuning_timer(unsigned long data)
 static void sdhci_cmd_irq(struct sdhci_host *host, u32 intmask)
 {
 	u16 auto_cmd_status;
+	u32 command;
 	BUG_ON(intmask == 0);
 
 	if (!host->cmd) {
@@ -2591,20 +2614,14 @@ static void sdhci_cmd_irq(struct sdhci_host *host, u32 intmask)
 			host->cmd->error = -EILSEQ;
 	}
 
-	if (host->quirks2 & SDHCI_QUIRK2_IGNORE_CMDCRC_FOR_TUNING) {
-		if ((host->cmd->opcode == MMC_SEND_TUNING_BLOCK_HS400) ||
-			(host->cmd->opcode == MMC_SEND_TUNING_BLOCK_HS200) ||
-			(host->cmd->opcode == MMC_SEND_TUNING_BLOCK)) {
-			if (intmask & SDHCI_INT_CRC) {
-				sdhci_reset(host, SDHCI_RESET_CMD);
-				host->cmd->error = 0;
-			}
-		}
-	}
-
 	if (host->cmd->error) {
-		if (host->cmd->error == -EILSEQ)
-			host->flags |= SDHCI_NEEDS_RETUNING;
+		command = SDHCI_GET_CMD(sdhci_readw(host,
+						    SDHCI_COMMAND));
+		if (host->cmd->error == -EILSEQ &&
+		    (command != MMC_SEND_TUNING_BLOCK_HS400) &&
+		    (command != MMC_SEND_TUNING_BLOCK_HS200) &&
+		    (command != MMC_SEND_TUNING_BLOCK))
+				host->flags |= SDHCI_NEEDS_RETUNING;
 		tasklet_schedule(&host->finish_tasklet);
 		return;
 	}
@@ -2629,17 +2646,6 @@ static void sdhci_cmd_irq(struct sdhci_host *host, u32 intmask)
 
 		/* The controller does not support the end-of-busy IRQ,
 		 * fall through and take the SDHCI_INT_RESPONSE */
-	}
-
-	if (host->quirks2 & SDHCI_QUIRK2_IGNORE_CMDCRC_FOR_TUNING) {
-		if ((host->cmd->opcode == MMC_SEND_TUNING_BLOCK_HS400) ||
-			(host->cmd->opcode == MMC_SEND_TUNING_BLOCK_HS200) ||
-			(host->cmd->opcode == MMC_SEND_TUNING_BLOCK)) {
-			if (intmask & SDHCI_INT_CRC) {
-				sdhci_finish_command(host);
-				return;
-			}
-		}
 	}
 
 	if (intmask & SDHCI_INT_RESPONSE)
@@ -2727,8 +2733,7 @@ static void sdhci_data_irq(struct sdhci_host *host, u32 intmask)
 		host->data->error = -EIO;
 	}
 	if (host->data->error) {
-		if ((intmask & (SDHCI_INT_DATA_CRC | SDHCI_INT_DATA_TIMEOUT)) &&
-		    (host->quirks2 & SDHCI_QUIRK2_IGNORE_CMDCRC_FOR_TUNING)) {
+		if (intmask & (SDHCI_INT_DATA_CRC | SDHCI_INT_DATA_TIMEOUT)) {
 			command = SDHCI_GET_CMD(sdhci_readw(host,
 							    SDHCI_COMMAND));
 			if ((command != MMC_SEND_TUNING_BLOCK_HS400) &&
@@ -3146,6 +3151,7 @@ struct sdhci_host *sdhci_alloc_host(struct device *dev,
 	host->mmc = mmc;
 
 	spin_lock_init(&host->lock);
+	spin_lock_init(&host->next_lock);
 	mutex_init(&host->ios_mutex);
 
 	return host;
@@ -3177,6 +3183,12 @@ int sdhci_add_host(struct sdhci_host *host)
 	host->version = sdhci_readw(host, SDHCI_HOST_VERSION);
 	host->version = (host->version & SDHCI_SPEC_VER_MASK)
 				>> SDHCI_SPEC_VER_SHIFT;
+
+#ifdef CONFIG_MMC_SDHCI_PROHIBIT_SD_SPEC3
+	if (!(mmc->caps & MMC_CAP_NONREMOVABLE))
+		host->version = SDHCI_SPEC_200;
+#endif
+
 	if (host->version > SDHCI_SPEC_300) {
 		pr_err("%s: Unknown controller version (%d). "
 			"You may experience problems.\n", mmc_hostname(mmc),
@@ -3376,7 +3388,7 @@ int sdhci_add_host(struct sdhci_host *host)
 
 	/* SDR104 supports also implies SDR50 support */
 	if (caps[1] & SDHCI_SUPPORT_SDR104)
-		mmc->caps |= MMC_CAP_UHS_SDR104 | MMC_CAP_UHS_SDR50;
+		mmc->caps |=  MMC_CAP_UHS_SDR104 | MMC_CAP_UHS_SDR50;
 	else if (caps[1] & SDHCI_SUPPORT_SDR50)
 		mmc->caps |= MMC_CAP_UHS_SDR50;
 
@@ -3427,6 +3439,15 @@ int sdhci_add_host(struct sdhci_host *host)
 	 * value.
 	 */
 	max_current_caps = sdhci_readl(host, SDHCI_MAX_CURRENT);
+
+#ifdef CONFIG_MMC_SDHCI_MIMO
+	/* Custom: An external level shifter on SDC3 */
+	if (strcmp(host->hw_name, "msm_sdcc.3") == 0) {
+		caps[0] |= (SDHCI_CAN_VDD_330 |
+			SDHCI_CAN_VDD_300 |
+			SDHCI_CAN_VDD_180);
+	}
+#endif
 
 	if (caps[0] & SDHCI_CAN_VDD_330) {
 		int max_current_330;
