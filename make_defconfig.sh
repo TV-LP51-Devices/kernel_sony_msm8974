@@ -2,7 +2,7 @@
 
 for device in honami togari amami; do
 
-DEFCONFIG_FILE=cm_rhine_row_${device}_defconfig
+DEFCONFIG_FILE=cm_rhine_${device}_defconfig
 
 if [ ! -e arch/arm/configs/$DEFCONFIG_FILE ]; then
 	echo "No such file: arch/arm/configs/$DEFCONFIG_FILE"
