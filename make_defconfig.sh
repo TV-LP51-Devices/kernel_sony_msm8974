@@ -2,7 +2,11 @@
 
 for device in honami togari amami; do
 
-DEFCONFIG_FILE=cm_rhine_${device}_defconfig
+DEFCONFIG_FILE=cm_rhine_row_${device}_defconfig
+
+for device in sirius castor castor_windy leo aries scorpion scorpion_windy ; do
+
+DEFCONFIG_FILE=cm_shinano_${device}_defconfig
 
 if [ ! -e arch/arm/configs/$DEFCONFIG_FILE ]; then
 	echo "No such file: arch/arm/configs/$DEFCONFIG_FILE"
